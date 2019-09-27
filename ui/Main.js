@@ -61,16 +61,16 @@ export default class Main extends React.Component<Props, State> {
             Usage: Move the '@' drag handles to re-order the list.
           </Text>
           <Text style={styles.paragraph}>
-            Click an 'X' to delete a row and notice that drag handle no longer
-            works for remaining rows.
+            Click an 'X' to delete a list entry and notice that the '@' drag
+            handles no longer works for the remaining items.
           </Text>
           <Text style={styles.paragraph}>
-            Type something in new task entry box and hit return. Notice drag
-            handle for _that_ row location now works, but others remain broken.
+            Enter a new task and hit return. Notice that the drag handle for
+            _that_ row (doesn't move with dragging), but others remain broken.
           </Text>
           <Text style={styles.paragraph}>
-            Reload app or click button to get all drag handles working again
-            (restores all initial rows)
+            Reload app (restores all initial rows) or click button to force
+            re-rendering of the drag handles and get them working again.
           </Text>
         </View>
         <NewGoalPanel
