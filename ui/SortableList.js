@@ -7,7 +7,7 @@ import Animated from 'react-native-reanimated';
 import {PanGestureHandler, State} from 'react-native-gesture-handler';
 import type {ScrollEvent} from 'react-native/Libraries/Types/CoreEventTypes';
 
-const {cond, eq, add, call, Value, event, or, debug} = Animated;
+const {cond, eq, add, call, Value, event, block, set, or, debug} = Animated;
 
 interface LayoutRectangle {
   x: number;
@@ -50,6 +50,15 @@ type RState = {
 };
 
 export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
+  state: RState = {
+    rowsDataProvider: new DataProvider((r1, r2) => {
+      console.debug('r1 = ', r1, ' r2 = ', r2, ' are different = ', r1 !== r2);
+      return r1 !== r2;
+    }, this.props.indexToKey).cloneWithRows(this.props.data),
+    isDraggingRow: false,
+    draggingRowIdx: -1,
+  };
+
   // Hold a reference to the list so that we can trigger updates on it for scrolling.
   recylerListViewRef = React.createRef<RecyclerListView<any, any>>();
   _layoutProvider: typeof LayoutProvider;
@@ -83,10 +92,35 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
     this.onGestureEvent = event(
       [
         {
-          nativeEvent: {
-            absoluteY: this.absoluteY,
-            state: this.gestureState,
-          },
+          // nativeEvent: {
+          //   absoluteY: this.absoluteY,
+          //   state: this.gestureState,
+          // },
+          nativeEvent: ({absoluteY: y, state}) =>
+            block([
+              set(this.absoluteY, y),
+              set(this.gestureState, state),
+
+              cond(
+                or(
+                  eq(state, State.END),
+                  eq(state, State.CANCELLED),
+                  eq(state, State.FAILED),
+                  eq(state, State.UNDETERMINED),
+                ),
+                call([], this.animatedCodeReset),
+              ),
+
+              cond(
+                eq(state, State.BEGAN),
+                call([this.absoluteY], this.animatedCodeRowDragStart),
+              ),
+
+              cond(
+                eq(state, State.ACTIVE),
+                call([this.absoluteY], this.animatedCodeRowMoving),
+              ),
+            ]),
         },
       ],
       {useNativeDriver: true},
@@ -103,19 +137,12 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
         dim.height = props.rowHeight;
       },
     );
-
-    const dataProvider = new DataProvider((r1, r2) => {
-      return r1 !== r2;
-    }, props.indexToKey);
-
-    this.state = {
-      rowsDataProvider: dataProvider.cloneWithRows(props.data),
-      isDraggingRow: false,
-      draggingRowIdx: -1,
-    };
   }
 
   componentDidUpdate(prevProps: Props<T>) {
+    console.debug(
+      '==================== componentDidUpdate ===========================',
+    );
     if (prevProps.data !== this.props.data) {
       this.setState({
         rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
@@ -173,9 +200,12 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
   };
 
   animatedCodeReset = () => {
+    console.debug(
+      '==================== DROPPED =================================',
+    );
     const newData = this.state.rowsDataProvider.getAllData();
     this.setState({
-      rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(newData),
+      // rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(newData),
       isDraggingRow: false,
       draggingRowIdx: -1,
     });
@@ -240,6 +270,9 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
     const draggedRowOverListIdx = this.yToIndex(y);
 
     if (draggedRowOverListIdx !== this.currIdx) {
+      console.debug(
+        '==================== animatedCodeRowMoving dragging over ============',
+      );
       this.setState({
         rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
           immutableMove(
@@ -261,6 +294,7 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
       index,
       this.state.draggingRowIdx === index ? 'placeholder' : 'normal',
       <>
+        {console.debug('Drag handle being rendered again for index = ', index)}
         <PanGestureHandler
           minPointers={1}
           maxPointers={1}
@@ -276,59 +310,23 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
 
   render() {
     /*
-    1) If we are dragging then we render:
+  1) If we are dragging then we render:
 
-       i) The list but with the row being dragged as the opaque background colour as it is moved in the list in
-        response to the drag i.e. the row moves in +1 increments up or down the list and the blank
-        placeholder indicates where it in the list it would be if the drag is released.
+     i) The list but with the row being dragged as the opaque background colour as it is moved in the list in
+      response to the drag i.e. the row moves in +1 increments up or down the list and the blank
+      placeholder indicates where it in the list it would be if the drag is released.
 
-       ii) The row that is being dragged in its own view ontop of the list, i.e. absolute and
-       with a zIndex > than the list behind it.
+     ii) The row that is being dragged in its own view ontop of the list, i.e. absolute and
+     with a zIndex > than the list behind it.
 
-       The two actions when combined give the impression of the row being picked up and the list shuffling
-       around it as the row is dragged up or down.
+     The two actions when combined give the impression of the row being picked up and the list shuffling
+     around it as the row is dragged up or down.
 
-     2) Else, if we are not dragging then render list as normal with nothing hovering over the top.
-    */
+   2) Else, if we are not dragging then render list as normal with nothing hovering over the top.
+  */
 
     return (
       <>
-        <Animated.Code>
-          {() =>
-            cond(
-              or(
-                eq(this.gestureState, State.END),
-                eq(this.gestureState, State.CANCELLED),
-                eq(this.gestureState, State.FAILED),
-                eq(this.gestureState, State.UNDETERMINED),
-              ),
-              call([], this.animatedCodeReset),
-            )
-          }
-        </Animated.Code>
-
-        {/*<Animated.Code>*/}
-        {/*  {() => debug("Bollocks, gesture state = ", this.gestureState)}*/}
-        {/*</Animated.Code>*/}
-
-        <Animated.Code>
-          {() =>
-            cond(
-              eq(this.gestureState, State.BEGAN),
-              call([this.absoluteY], this.animatedCodeRowDragStart),
-            )
-          }
-        </Animated.Code>
-
-        <Animated.Code>
-          {() =>
-            cond(
-              eq(this.gestureState, State.ACTIVE),
-              call([this.absoluteY], this.animatedCodeRowMoving),
-            )
-          }
-        </Animated.Code>
-
         {this.state.isDraggingRow ? (
           <Animated.View
             style={{

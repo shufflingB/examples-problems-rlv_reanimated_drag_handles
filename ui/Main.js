@@ -167,7 +167,7 @@ const vsRow: ViewStyle = {
   justifyContent: 'space-around',
   opacity: 1,
   borderColor: 'lightgrey',
-  // borderTopWidth: 1,
+  borderTopWidth: 1,
   borderBottomWidth: 1,
   backgroundColor: 'white',
 };
