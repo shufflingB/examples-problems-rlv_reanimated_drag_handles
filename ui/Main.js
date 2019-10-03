@@ -3,12 +3,12 @@
 import * as React from 'react';
 import {SafeAreaView, StyleSheet, Text, View} from 'react-native';
 import {SortableList} from './SortableList';
+import {widthPercentageToDP} from 'react-native-responsive-screen';
+import {RectButton} from 'react-native-gesture-handler';
 import type {
   TextStyle,
   ViewStyle,
 } from 'react-native/Libraries/StyleSheet/StyleSheet';
-import {widthPercentageToDP} from 'react-native-responsive-screen';
-import {RectButton} from 'react-native-gesture-handler';
 import {CHARS_ITEM_DESCRIPTIONS_MAX} from '../appConstants';
 
 import NewGoalPanel from './NewGoalPanel';
@@ -91,12 +91,6 @@ export default class Main extends React.Component<Props, State> {
           }
           rowHeight={rowHeight}
           indexToKey={idx => {
-            // console.debug("idx = ", idx, "goals[idx=] ", this.props.goals[idx]);
-            // const id =
-            //   this.props.goals[idx] === undefined
-            //     ? "deleted"
-            //     : this.props.goals[idx].id.toString();
-            // return id;
             return idx.toString();
           }}
           renderDragHandle={() => <Text>@</Text>}
@@ -106,17 +100,27 @@ export default class Main extends React.Component<Props, State> {
             dataItemState,
             dataItemDragHandle,
           ) => {
+            console.debug(
+              'renderRow dataItem =',
+              dataItem,
+              ' dataItemIdx = ',
+              dataItemIdx,
+              ' dataItemState =',
+              dataItemState,
+            );
             return (
               <View
                 style={
-                  dataItemState === 'placeholder'
+                  dataItemState === 'normal'
+                    ? styles.row
+                    : dataItemState === 'placeholder'
                     ? styles.rowPlaceholderInList
-                    : styles.row
+                    : styles.rowBeingDragged
                 }>
                 <View style={styles.dragHandle}>{dataItemDragHandle}</View>
                 <View style={styles.content}>
                   <Text numberOfLines={3} style={styles.taskText}>
-                    {dataItem.task}
+                    {dataItem.task} {dataItemState}
                   </Text>
                 </View>
                 <RectButton
@@ -184,6 +188,8 @@ const vsRowBeingDragged: ViewStyle = {
   shadowOffset: {width: 0, height: 0.5 * elevation},
   shadowOpacity: 0.3,
   shadowRadius: 0.8 * elevation,
+  borderWidth: 1,
+  borderColor: 'red',
   opacity: 1,
 };
 

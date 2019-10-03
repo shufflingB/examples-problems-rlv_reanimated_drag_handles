@@ -5271,10 +5271,10 @@ realpath-native@^1.1.0:
   dependencies:
     util.promisify "^1.0.0"
 
-recyclerlistview@^2.0.12:
-  version "2.0.12"
-  resolved "https://registry.yarnpkg.com/recyclerlistview/-/recyclerlistview-2.0.12.tgz#d50ee959409947faccd3f3abf2789e7acfdc31f9"
-  integrity sha512-5krJqESA6Pf5RqeWiRL8DcoXjyHLdz5fw/B3WGe4er9hAOv5Oj6hb4RXcgLTDAeoUePuO2Dyd+MZ7n0KP9VnQQ==
+recyclerlistview@^2.0.13-alpha.1:
+  version "2.0.13-alpha.1"
+  resolved "https://registry.yarnpkg.com/recyclerlistview/-/recyclerlistview-2.0.13-alpha.1.tgz#855fea94e19cedaaa9485523bebad6f177fb4fae"
+  integrity sha512-I/VRoSCBVDVwPAElTF4RHwKIrMSf9SPjDKA6ltC0A+MJQ1v1PL6amKEW35Uwa7+pD7WWsIMAdG5j3NFt0bmSOw==
   dependencies:
     lodash.debounce "4.0.8"
     prop-types "15.5.8"

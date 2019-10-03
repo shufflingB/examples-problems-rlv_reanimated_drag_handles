@@ -10,8 +10,6 @@ import {
   widthPercentageToDP,
 } from 'react-native-responsive-screen';
 
-
-
 export const CHARS_ITEM_DESCRIPTIONS_MAX = 90;
 
 export const COLOUR_PRIMARY = 'red';

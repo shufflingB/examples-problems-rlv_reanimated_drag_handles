@@ -1,26 +1,11 @@
 //@flow
 import * as React from 'react';
-import {Dimensions, View} from 'react-native';
+import {Dimensions, View, Animated} from 'react-native';
 import {DataProvider, LayoutProvider, RecyclerListView} from 'recyclerlistview';
 
-import Animated from 'react-native-reanimated';
 import {PanGestureHandler, State} from 'react-native-gesture-handler';
+import type {ViewLayoutEvent} from 'react-native/Libraries/Components/View/ViewPropTypes';
 import type {ScrollEvent} from 'react-native/Libraries/Types/CoreEventTypes';
-
-const {cond, eq, add, call, Value, event, block, set, or, debug} = Animated;
-
-interface LayoutRectangle {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface LayoutChangeEvent {
-  nativeEvent: {
-    layout: LayoutRectangle,
-  };
-}
 
 function immutableMove(arr, from, to) {
   return arr.reduce((prev, current, idx, self) => {
@@ -46,104 +31,66 @@ function immutableMove(arr, from, to) {
 type RState = {
   rowsDataProvider: typeof DataProvider,
   isDraggingRow: boolean,
-  draggingRowIdx: number,
+  rlvCurrentDraggingRowIdx: number,
+  rlvAtStartDraggingRowIdx: number,
+  rlvAbsoluteYTopOffset: number,
+  rlvFlatListHeight: number,
+  rlvScrollOffset: number,
 };
 
 export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
   state: RState = {
     rowsDataProvider: new DataProvider((r1, r2) => {
-      console.debug('r1 = ', r1, ' r2 = ', r2, ' are different = ', r1 !== r2);
       return r1 !== r2;
     }, this.props.indexToKey).cloneWithRows(this.props.data),
     isDraggingRow: false,
-    draggingRowIdx: -1,
+    rlvCurrentDraggingRowIdx: -1,
+    rlvAtStartDraggingRowIdx: -1,
+    rlvAbsoluteYTopOffset: 0,
+    rlvFlatListHeight: 0,
+    rlvScrollOffset: 0,
   };
 
-  // Hold a reference to the list so that we can trigger updates on it for scrolling.
-  recylerListViewRef = React.createRef<RecyclerListView<any, any>>();
-  _layoutProvider: typeof LayoutProvider;
-  rowCenterY: Animated.Node<number>;
-  absoluteY = new Value(0);
-  gestureState = new Value(-1);
-  onGestureEvent: any;
-  halfRowHeightValue: Animated.Value<number>;
+  _rlvRef = React.createRef<RecyclerListView<any, any>>();
+  _rlvLayoutProvider = new LayoutProvider(
+    index => {
+      return 1;
+    },
+    (type, dim) => {
+      dim.width = Dimensions.get('window').width;
+      dim.height = this.props.rowHeight;
+    },
+  );
+  _rlvScrollingRequested = false;
 
-  /*The next two indices hold the position for the row that is currently being dragged.
-   * - The first one (origIdx) is the location in the list as it was originally passed to RLV.
-   * - Dragging is moving the row up or down in the list one place at a time. Each time it moves the list is re-rendered
-   *   so that the placeholder for the dragged item moves accordingly in the list below.
-   *   currIdx is the idx in that currently rendered list
-   * */
-
-  origIdx = -1; // index of row being currently dragged in the original list.
-  currIdx = -1; // index of the row being currently dragged in the _currently_ _rendered_ list
-  scrollOffset = 0;
-  flatlistHeight = 0;
-  topOffset = 0;
-  isScrolling = false;
-
-  constructor(props: Props<T>) {
-    super(props);
-
-    this.halfRowHeightValue = new Value(-props.rowHeight / 2);
-
-    const {width} = Dimensions.get('window');
-
-    this.onGestureEvent = event(
-      [
-        {
-          // nativeEvent: {
-          //   absoluteY: this.absoluteY,
-          //   state: this.gestureState,
-          // },
-          nativeEvent: ({absoluteY: y, state}) =>
-            block([
-              set(this.absoluteY, y),
-              set(this.gestureState, state),
-
-              cond(
-                or(
-                  eq(state, State.END),
-                  eq(state, State.CANCELLED),
-                  eq(state, State.FAILED),
-                  eq(state, State.UNDETERMINED),
-                ),
-                call([], this.animatedCodeReset),
-              ),
-
-              cond(
-                eq(state, State.BEGAN),
-                call([this.absoluteY], this.animatedCodeRowDragStart),
-              ),
-
-              cond(
-                eq(state, State.ACTIVE),
-                call([this.absoluteY], this.animatedCodeRowMoving),
-              ),
-            ]),
+  _rowAbsoluteY = new Animated.Value(0);
+  _translateY = new Animated.Value(0);
+  _halfRowHeightValue = new Animated.Value(-this.props.rowHeight / 2);
+  _panGestureOnEventUpdate = Animated.event(
+    [
+      {
+        nativeEvent: {
+          translationY: this._translateY,
+          absoluteY: this._rowAbsoluteY,
         },
-      ],
-      {useNativeDriver: true},
-    );
-
-    this.rowCenterY = add(this.absoluteY, this.halfRowHeightValue);
-
-    this._layoutProvider = new LayoutProvider(
-      index => {
-        return 1;
       },
-      (type, dim) => {
-        dim.width = width;
-        dim.height = props.rowHeight;
-      },
-    );
+    ],
+    {useNativeDriver: true},
+  );
+
+  componentDidMount() {
+    // this._rowAbsoluteY.addListener(y => this.acRowMoving(y));
+    // this._rowAbsoluteY.addListener(y => console.debug('absoluteY = ', y));
+  }
+
+  componentWillUnmount() {
+    this._rowAbsoluteY.removeAllListeners();
   }
 
   componentDidUpdate(prevProps: Props<T>) {
-    console.debug(
-      '==================== componentDidUpdate ===========================',
-    );
+    console.debug('componentDidUpdate ===========================');
     if (prevProps.data !== this.props.data) {
+      console.debug('update rowsData provider');
       this.setState({
         rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
           this.props.data,
@@ -152,30 +99,24 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
     }
   }
 
-  handleScroll = (rawEvent: ScrollEvent, offsetX: number, offsetY: number) => {
-    this.scrollOffset = offsetY;
+  rlvOnScrollStoreOffsetInfo = (
+    rawEvent: ScrollEvent,
+    offsetX: number,
+    offsetY: number,
+  ) => {
+    this.setState({rlvScrollOffset: offsetY});
   };
 
-  handleLayout = (e: LayoutChangeEvent) => {
-    this.flatlistHeight = e.nativeEvent.layout.height;
-
-    this.topOffset = e.nativeEvent.layout.y;
+  rlvOnLayoutStoreLayoutInfo = (e: ViewLayoutEvent) => {
+    console.debug(' Handling layout e = ', e.nativeEvent);
+    this.setState({
+      rlvAbsoluteYTopOffset: e.nativeEvent.layout.y,
+      rlvFlatListHeight: e.nativeEvent.layout.height,
+    });
   };
 
-  // Converts an absolute y value into the index in the array
-  yToIndex = (y: number) =>
-    Math.min(
-      this.state.rowsDataProvider.getSize() - 1,
-      Math.max(
-        0,
-        Math.floor(
-          (y + this.scrollOffset - this.topOffset) / this.props.rowHeight,
-        ),
-      ),
-    );
-
-  recyclerListComponentScroll = (scrollAmountY: number) => {
-    if (!this.isScrolling) {
+  rlvTriggerScroll = (scrollAmountY: number) => {
+    if (!this._rlvScrollingRequested) {
       // Cope with being cancelled on callback
       console.debug(
         'moveList, !this.scrolling (not scrolling, not doing anything',
@@ -183,83 +124,73 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
       return;
     }
 
-    if (this.recylerListViewRef.current === null) {
+    if (this._rlvRef.current === null) {
       console.debug('moveList, no this.list.current, not doing anything');
       return;
     }
 
-    this.recylerListViewRef.current.scrollToOffset(
-      // this.scrollOffset + amount,
+    this._rlvRef.current.scrollToOffset(
+      // this._scrollOffset + amount,
       0,
-      this.scrollOffset + scrollAmountY,
+      this.state.rlvScrollOffset + scrollAmountY,
       false,
     );
     requestAnimationFrame(() => {
-      this.recyclerListComponentScroll(scrollAmountY);
+      this.rlvTriggerScroll(scrollAmountY);
     });
   };
 
-  animatedCodeReset = () => {
-    console.debug(
-      '==================== DROPPED =================================',
+  // Converts an absolute y value into the index in the array
+  yToRlvIndex = (absoluteY: number): number => {
+    const idx = Math.min(
+      this.state.rowsDataProvider.getSize() - 1,
+      Math.max(
+        0,
+        Math.floor(
+          (absoluteY +
+            this.state.rlvScrollOffset -
+            this.state.rlvAbsoluteYTopOffset) /
+            this.props.rowHeight,
+        ),
+      ),
     );
-    const newData = this.state.rowsDataProvider.getAllData();
-    this.setState({
-      // rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(newData),
-      isDraggingRow: false,
-      draggingRowIdx: -1,
-    });
-    // Trigger updating of external list iff necessary depending on if moving up or down in list
-    if (this.origIdx > this.currIdx) {
-      // Row moved up the list
-      this.props.onSort(this.origIdx, this.currIdx);
-    } else if (this.origIdx < this.currIdx) {
-      // Row moved down in the list
-      const lastIndex = newData.length - 1;
-      this.currIdx + 1 > lastIndex
-        ? this.props.onSort(this.origIdx, null)
-        : this.props.onSort(this.origIdx, this.currIdx + 1);
-    }
-    this.isScrolling = false;
-    this.currIdx = -1;
-    this.origIdx = -1;
+    console.debug(
+      'y = ',
+      absoluteY,
+      ' scrollOffeset =',
+      this.state.rlvScrollOffset,
+      ' rlvAbsoluteYTopOffset = ',
+      this.state.rlvAbsoluteYTopOffset,
+      ' idx = ',
+      idx,
+    );
+
+    return idx;
   };
 
-  animatedCodeRowDragStart = ([y]: {y: number}) => {
-    /*Determine the index of the row that is being dragged and store it so that we
-     * know what row is being moved and can:
-     *   1) Determine what row to show animated above the non-moving rows of the list.
-     *   2) Know where to place a blank placeholder row where the one we are dragging was originally from.
-     *   3) Ultimately figure out how to update the array elements that are being dragged around
-     * */
-
-    this.currIdx = this.yToIndex(y);
-    this.origIdx = this.currIdx;
-    this.setState({isDraggingRow: true, draggingRowIdx: this.currIdx});
-  };
-
-  animatedCodeRowMoving = ([y]: {y: number}) => {
+  acRowMoving = (y: number) => {
     /*
      * First up, have we dragged the row sufficiently towards the Bottom or Top of the screen that we should
      * moving the view port on the list by scrolling Down or Up.
      */
+    console.debug('acRowMoving y', y);
 
-    const scrollOnset = 100;
+    const scrollOnset = this.props.rowHeight / 2;
 
-    if (y > this.flatlistHeight - scrollOnset) {
+    if (y > this.state.rlvFlatListHeight - scrollOnset) {
       // Dragged row towards bottom of screen
-      if (!this.isScrolling) {
-        this.isScrolling = true;
-        this.recyclerListComponentScroll(20); // mv view on list down
+      if (!this._rlvScrollingRequested) {
+        this._rlvScrollingRequested = true;
+        this.rlvTriggerScroll(this.props.rowHeight); // mv view on list down
       }
     } else if (y < scrollOnset) {
       // ... towards top of screen
-      if (!this.isScrolling) {
-        this.isScrolling = true;
-        this.recyclerListComponentScroll(-20); // mv view on list up
+      if (!this._rlvScrollingRequested) {
+        this._rlvScrollingRequested = true;
+        this.rlvTriggerScroll(-this.props.rowHeight); // mv view on list up
       }
     } else {
-      this.isScrolling = false;
+      this._rlvScrollingRequested = false;
     }
 
     /*
@@ -267,116 +198,195 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
      * 1) The underlying data list order.
      * 2) Our references to what is being dragged in that list.
      */
-    const draggedRowOverListIdx = this.yToIndex(y);
+    const draggedRowOverListIdx = this.yToRlvIndex(y);
+    console.debug('acRowMoving detected moving idx =', draggedRowOverListIdx);
 
-    if (draggedRowOverListIdx !== this.currIdx) {
+    if (draggedRowOverListIdx !== this.state.rlvCurrentDraggingRowIdx) {
       console.debug(
-        '==================== animatedCodeRowMoving dragging over ============',
+        '==================== acRowMoving dragging over ============',
       );
       this.setState({
         rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
           immutableMove(
             this.state.rowsDataProvider.getAllData(),
-            this.currIdx,
+            this.state.rlvCurrentDraggingRowIdx,
             draggedRowOverListIdx,
           ),
         ),
-        draggingRowIdx: draggedRowOverListIdx,
+        rlvCurrentDraggingRowIdx: draggedRowOverListIdx,
       });
-      this.currIdx = draggedRowOverListIdx;
     }
   };
 
-  _rowRenderer = (type, data, index) => {
+  _panGestureOnStateChange = event => {
+    console.debug('event.nativeEvent === ', event.nativeEvent);
+    switch (event.nativeEvent.state) {
+      case State.BEGAN:
+        console.debug(
+          '============== Gesture BEGAN =================================',
+        );
+        const rlvAtGestureStartIdx = this.yToRlvIndex(
+          event.nativeEvent.absoluteY,
+        );
+        const draggingRowOffset = rlvAtGestureStartIdx * this.props.rowHeight;
+        console.debug('scrollOffset = ', this.state.rlvScrollOffset);
+        this._translateY.setOffset(
+          draggingRowOffset, // TODO: Figure out this offset arse we
+          // draggingRowOffset - this.state.rlvScrollOffset,
+        );
+
+        console.debug(
+          'acRowDragStart detected moving idx =',
+          rlvAtGestureStartIdx,
+        );
+        this.setState({
+          isDraggingRow: true,
+          rlvCurrentDraggingRowIdx: rlvAtGestureStartIdx,
+          rlvAtStartDraggingRowIdx: rlvAtGestureStartIdx,
+        });
+
+        break;
+
+      case State.ACTIVE:
+        this._rowAbsoluteY.addListener(({value}) => this.acRowMoving(value));
+        break;
+
+      case State.CANCELLED:
+      //  Intentional fall through
+      case State.FAILED:
+      //  Intentional fall through
+      case State.UNDETERMINED:
+      //  Intentional fall through
+      case State.END:
+        console.debug(
+          '==================== Gesture END =================================',
+        );
+        this._rowAbsoluteY.removeAllListeners();
+
+        // Take what we need to update our onSort callback
+        const rlvAtStartOfGestureIdx = this.state.rlvAtStartDraggingRowIdx;
+        const rlvAtEndOfGestureIdx = this.state.rlvCurrentDraggingRowIdx;
+        const newData = this.state.rowsDataProvider.getAllData();
+
+        // Reset state and internal properties
+        this.setState({
+          isDraggingRow: false,
+          rlvCurrentDraggingRowIdx: -1,
+          rlvAtStartDraggingRowIdx: -1,
+        });
+        this._rlvScrollingRequested = false;
+        // this._translateY.resetAnimation();
+        this._translateY.setOffset(0);
+
+        // Trigger updating of external data iff necessary depending on if moving up or down in list
+        if (rlvAtStartOfGestureIdx > rlvAtEndOfGestureIdx) {
+          // Row moved up the list
+          this.props.onSort(rlvAtStartOfGestureIdx, rlvAtEndOfGestureIdx);
+        } else if (rlvAtStartOfGestureIdx < rlvAtEndOfGestureIdx) {
+          // Row moved down in the list
+          const lastIndex = newData.length - 1;
+          rlvAtEndOfGestureIdx + 1 > lastIndex
+            ? this.props.onSort(rlvAtStartOfGestureIdx, null)
+            : this.props.onSort(
+                rlvAtStartOfGestureIdx,
+                rlvAtEndOfGestureIdx + 1,
+              );
+        }
+
+        break;
+
+      default:
+        console.debug(
+          'Unexpected nativeEvent.state, got ',
+          event.nativeEvent.state,
+        );
+    }
+  };
+
+  _dragHandleRender = () => {
+    return (
+      <PanGestureHandler
+        minPointers={1}
+        maxPointers={1}
+        onGestureEvent={this._panGestureOnEventUpdate}
+        onHandlerStateChange={this._panGestureOnStateChange}>
+        <Animated.View>{this.props.renderDragHandle()}</Animated.View>
+      </PanGestureHandler>
+    );
+  };
+
+  _rlvRowRender = (type, data, index) => {
     // Render the row if it's not being dragged, else render a filler placeholder
     return this.props.renderRow(
       data,
       index,
-      this.state.draggingRowIdx === index ? 'placeholder' : 'normal',
-      <>
-        {console.debug('Drag handle being rendered again for index = ', index)}
-        <PanGestureHandler
-          minPointers={1}
-          maxPointers={1}
-          onGestureEvent={this.onGestureEvent}
-          onHandlerStateChange={this.onGestureEvent}>
-          <Animated.View>
-            <View>{this.props.renderDragHandle()}</View>
-          </Animated.View>
-        </PanGestureHandler>
-      </>,
+      this.state.rlvCurrentDraggingRowIdx === index ? 'placeholder' : 'normal',
+      this._dragHandleRender(),
+    );
+  };
+
+  _draggingRowRender = (isDragging: boolean, draggingRowIdx: number) => {
+    return (
+      <Animated.View
+        style={{
+          position: 'absolute',
+          transform: [{translateY: this._translateY}],
+          // height: this.props.rowHeight,
+          // width: '100%',
+          zIndex: 200,
+        }}>
+        {isDragging &&
+          this.props.renderRow(
+            this.props.data[draggingRowIdx],
+            draggingRowIdx,
+            'dragging',
+            this.props.renderDragHandle(), // No need wrap PanGestureHandler around
+          )}
+      </Animated.View>
     );
   };
 
   render() {
     /*
-  1) If we are dragging then we render:
-
-     i) The list but with the row being dragged as the opaque background colour as it is moved in the list in
-      response to the drag i.e. the row moves in +1 increments up or down the list and the blank
-      placeholder indicates where it in the list it would be if the drag is released.
-
-     ii) The row that is being dragged in its own view ontop of the list, i.e. absolute and
-     with a zIndex > than the list behind it.
-
-     The two actions when combined give the impression of the row being picked up and the list shuffling
-     around it as the row is dragged up or down.
-
-   2) Else, if we are not dragging then render list as normal with nothing hovering over the top.
-  */
+     * Render the Animated View over the top of the RLV. Then, when:
+     *
+     * - Not dragging,
+     *   a) the Animated View is rendered with nothing in it (the alternative
+     *   of not rendering the Animated View doesn't work when useNative is
+     *   enabled (as of RN 0.61.1) when rows are removed or items in the list are updated)
+     *   b) RLV is instructed to render all rows as normal.
+     *
+     * - Dragging
+     *   a) Animated View is rendered with a row styles as dragging.
+     *   b) RLV renders the row that is being dragged up or down the list styled
+     *   as a placeholder.
+     *
+     */
 
     return (
-      <>
-        {this.state.isDraggingRow ? (
-          <Animated.View
-            style={{
-              top: this.rowCenterY,
-              position: 'absolute',
-              width: '100%',
-              zIndex: 99,
-              elevation: 99,
-            }}>
-            {this.props.renderRow(
-              this.state.rowsDataProvider.getDataForIndex(
-                this.state.draggingRowIdx,
-              ),
-              this.state.draggingRowIdx,
-              'dragging',
-              this.props.renderDragHandle(),
-            )}
-          </Animated.View>
-        ) : null}
-
+      <View
+        style={{flex: 1}}
+        onLayout={this.rlvOnLayoutStoreLayoutInfo}
+        // key={this.state.reRenderKey}
+      >
+        {this._draggingRowRender(
+          this.state.isDraggingRow,
+          this.state.rlvAtStartDraggingRowIdx,
+        )}
         {this.props.data.length < 1 ? null : (
-          /* TODO: Would like to remove length based key from RLV but without it removing rows from the data causes the
-           * remaining drag handles to cease working because the animated code gets unmounted and stops working. Having
-           * the length based key causes RLV to fully re-render and re-mount animated code, but also causes annoying
-           * flicker.
-           *
-           * Unsuccessful things tried to fix:
-           * - Animated.code blocks in with the drag handles to see if it reference counts better.
-           * - RLV's disable recycling argument to if it's RLV recycling of Views that's breaking things.
-           * - Keying the rows (second argument to RLV's Dataprovider constructor) with a unique key based on the row's
-           *   id and not just its idx.
-           * - Removing swipeable sub-component to see if it was the two gesture responders interfering with each other.
-           * - Using getDerivedState to update RLV's data provider instead of componentDidUpdate
-           *
-           * Workaround key rlvKeyKludge only changes when the length of what's being rendered gets shorter. Which
-           * at least stops the flicker when the length grows.
-           * */
           <RecyclerListView
             key={this.props.rlvKludgeKey}
-            ref={this.recylerListViewRef}
-            style={{flex: 1}}
-            onScroll={this.handleScroll}
-            onLayout={nativeEvent => this.handleLayout(nativeEvent)}
-            layoutProvider={this._layoutProvider}
+            ref={this._rlvRef}
+            // style={{flex: 1, borderColor: 'red', borderWidth: 1}}
+            onScroll={this.rlvOnScrollStoreOffsetInfo}
+            layoutProvider={this._rlvLayoutProvider}
             dataProvider={this.state.rowsDataProvider}
-            rowRenderer={this._rowRenderer}
+            rowRenderer={this._rlvRowRender}
             extendedState={{dragging: true}}
+            disableRecycling={true}
           />
         )}
-      </>
+      </View>
     );
   }
 }
