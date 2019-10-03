@@ -100,14 +100,6 @@ export default class Main extends React.Component<Props, State> {
             dataItemState,
             dataItemDragHandle,
           ) => {
-            console.debug(
-              'renderRow dataItem =',
-              dataItem,
-              ' dataItemIdx = ',
-              dataItemIdx,
-              ' dataItemState =',
-              dataItemState,
-            );
             return (
               <View
                 style={

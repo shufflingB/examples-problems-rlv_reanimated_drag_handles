@@ -1,6 +1,6 @@
 //@flow
 import * as React from 'react';
-import {Dimensions, View, Animated} from 'react-native';
+import {Animated, Dimensions, View} from 'react-native';
 import {DataProvider, LayoutProvider, RecyclerListView} from 'recyclerlistview';
 
 import {PanGestureHandler, State} from 'react-native-gesture-handler';
@@ -29,29 +29,29 @@ function immutableMove(arr, from, to) {
 }
 
 type RState = {
-  rowsDataProvider: typeof DataProvider,
+  rlvDataProvider: typeof DataProvider,
   isDraggingRow: boolean,
   rlvCurrentDraggingRowIdx: number,
   rlvAtStartDraggingRowIdx: number,
-  rlvAbsoluteYTopOffset: number,
-  rlvFlatListHeight: number,
-  rlvScrollOffset: number,
+  containerAbsoluteYTopOffset: number,
+  containerHeight: number,
 };
 
 export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
   state: RState = {
-    rowsDataProvider: new DataProvider((r1, r2) => {
+    rlvDataProvider: new DataProvider((r1, r2) => {
       return r1 !== r2;
     }, this.props.indexToKey).cloneWithRows(this.props.data),
     isDraggingRow: false,
     rlvCurrentDraggingRowIdx: -1,
     rlvAtStartDraggingRowIdx: -1,
-    rlvAbsoluteYTopOffset: 0,
-    rlvFlatListHeight: 0,
-    rlvScrollOffset: 0,
+    containerAbsoluteYTopOffset: 0,
+    containerHeight: 0,
   };
 
   _rlvRef = React.createRef<RecyclerListView<any, any>>();
+  _rlvScrollOffset: number = 0;
+  _rlvDragTranslateY: number; // Used to determine when to scroll
   _rlvLayoutProvider = new LayoutProvider(
     index => {
       return 1;
@@ -61,11 +61,19 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
       dim.height = this.props.rowHeight;
     },
   );
-  _rlvScrollingRequested = false;
+  // _rlvScrollingRequested = false;
 
+  /* Theoretically it would be possible to use a single animated value. But instead we have to use two because with
+   * Animated.View it's not currently possible to animated absolute layout values.
+   *
+   * These get used as follows:
+   * 1) _rowAbsoluteY - has a listener attached to it when dragging starts and is used to trigger moving the dragged
+   * row up and down in the RLV data provider and trigger scrolling.
+   * 2) _translateY - is used to animate the movement of the dragged row in synchrony with the touch in the Animated.View
+   * */
   _rowAbsoluteY = new Animated.Value(0);
   _translateY = new Animated.Value(0);
-  _halfRowHeightValue = new Animated.Value(-this.props.rowHeight / 2);
+
   _panGestureOnEventUpdate = Animated.event(
     [
       {
@@ -78,162 +86,121 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
     {useNativeDriver: true},
   );
 
-  componentDidMount() {
-    // this._rowAbsoluteY.addListener(y => this.acRowMoving(y));
-    // this._rowAbsoluteY.addListener(y => console.debug('absoluteY = ', y));
-  }
-
   componentWillUnmount() {
     this._rowAbsoluteY.removeAllListeners();
+    this._translateY.removeAllListeners();
   }
 
   componentDidUpdate(prevProps: Props<T>) {
-    console.debug('componentDidUpdate ===========================');
     if (prevProps.data !== this.props.data) {
-      console.debug('update rowsData provider');
       this.setState({
-        rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
+        rlvDataProvider: this.state.rlvDataProvider.cloneWithRows(
           this.props.data,
         ),
       });
     }
   }
+  onLayoutStoreLayoutInfo = (e: ViewLayoutEvent) => {
+    console.debug(' Handling layout e = ', e.nativeEvent);
+    this.setState({
+      containerAbsoluteYTopOffset: e.nativeEvent.layout.y,
+      containerHeight: e.nativeEvent.layout.height,
+    });
+  };
 
-  rlvOnScrollStoreOffsetInfo = (
+  _rlvOnScrollStoreOffsetInfo = (
     rawEvent: ScrollEvent,
     offsetX: number,
     offsetY: number,
   ) => {
-    this.setState({rlvScrollOffset: offsetY});
+    this._rlvScrollOffset = offsetY;
   };
 
-  rlvOnLayoutStoreLayoutInfo = (e: ViewLayoutEvent) => {
-    console.debug(' Handling layout e = ', e.nativeEvent);
-    this.setState({
-      rlvAbsoluteYTopOffset: e.nativeEvent.layout.y,
-      rlvFlatListHeight: e.nativeEvent.layout.height,
-    });
-  };
-
-  rlvTriggerScroll = (scrollAmountY: number) => {
-    if (!this._rlvScrollingRequested) {
+  _rlvTriggerScroll = (scrollAmountY: number) => {
+    if (this.state.isDraggingRow === false) {
       // Cope with being cancelled on callback
-      console.debug(
-        'moveList, !this.scrolling (not scrolling, not doing anything',
-      );
+      // console.debug('scrolling in progress, not calling again');
       return;
     }
+    // console.debug('scrolling requested by amount ', scrollAmountY);
 
     if (this._rlvRef.current === null) {
       console.debug('moveList, no this.list.current, not doing anything');
       return;
     }
 
+    // Don't bother scrolling if we are a the top already
+    if (this._rlvScrollOffset + scrollAmountY <= 0) {
+      console.debug('BOing');
+      return;
+    }
+
+    // this._rlvScrollingRequested = true;
     this._rlvRef.current.scrollToOffset(
       // this._scrollOffset + amount,
       0,
-      this.state.rlvScrollOffset + scrollAmountY,
+      this._rlvScrollOffset + scrollAmountY,
       false,
     );
+
     requestAnimationFrame(() => {
-      this.rlvTriggerScroll(scrollAmountY);
+      this._rlvTriggerScroll(scrollAmountY);
+      // this._rlvScrollingRequested = false;
     });
   };
 
-  // Converts an absolute y value into the index in the array
-  yToRlvIndex = (absoluteY: number): number => {
-    const idx = Math.min(
-      this.state.rowsDataProvider.getSize() - 1,
+  _rlvGetIndexFromY = (absoluteY: number): number => {
+    return Math.min(
+      this.state.rlvDataProvider.getSize() - 1,
       Math.max(
         0,
         Math.floor(
           (absoluteY +
-            this.state.rlvScrollOffset -
-            this.state.rlvAbsoluteYTopOffset) /
+            this._rlvScrollOffset -
+            this.state.containerAbsoluteYTopOffset) /
             this.props.rowHeight,
         ),
       ),
     );
-    console.debug(
-      'y = ',
-      absoluteY,
-      ' scrollOffeset =',
-      this.state.rlvScrollOffset,
-      ' rlvAbsoluteYTopOffset = ',
-      this.state.rlvAbsoluteYTopOffset,
-      ' idx = ',
-      idx,
-    );
-
-    return idx;
   };
 
-  acRowMoving = (y: number) => {
-    /*
-     * First up, have we dragged the row sufficiently towards the Bottom or Top of the screen that we should
-     * moving the view port on the list by scrolling Down or Up.
-     */
-    console.debug('acRowMoving y', y);
-
-    const scrollOnset = this.props.rowHeight / 2;
-
-    if (y > this.state.rlvFlatListHeight - scrollOnset) {
-      // Dragged row towards bottom of screen
-      if (!this._rlvScrollingRequested) {
-        this._rlvScrollingRequested = true;
-        this.rlvTriggerScroll(this.props.rowHeight); // mv view on list down
-      }
-    } else if (y < scrollOnset) {
-      // ... towards top of screen
-      if (!this._rlvScrollingRequested) {
-        this._rlvScrollingRequested = true;
-        this.rlvTriggerScroll(-this.props.rowHeight); // mv view on list up
-      }
-    } else {
-      this._rlvScrollingRequested = false;
-    }
-
-    /*
-     * Every time the dragged row moves over its immediate (above or below) neighbouring row update:
-     * 1) The underlying data list order.
-     * 2) Our references to what is being dragged in that list.
-     */
-    const draggedRowOverListIdx = this.yToRlvIndex(y);
-    console.debug('acRowMoving detected moving idx =', draggedRowOverListIdx);
-
-    if (draggedRowOverListIdx !== this.state.rlvCurrentDraggingRowIdx) {
-      console.debug(
-        '==================== acRowMoving dragging over ============',
+  _rlvRowRender = (type, data, index) => {
+    //
+    const dragHandleRender = () => {
+      return (
+        <PanGestureHandler
+          minPointers={1}
+          maxPointers={1}
+          onGestureEvent={this._panGestureOnEventUpdate}
+          onHandlerStateChange={this._panGestureOnStateChange}>
+          <Animated.View>{this.props.renderDragHandle()}</Animated.View>
+        </PanGestureHandler>
       );
-      this.setState({
-        rowsDataProvider: this.state.rowsDataProvider.cloneWithRows(
-          immutableMove(
-            this.state.rowsDataProvider.getAllData(),
-            this.state.rlvCurrentDraggingRowIdx,
-            draggedRowOverListIdx,
-          ),
-        ),
-        rlvCurrentDraggingRowIdx: draggedRowOverListIdx,
-      });
-    }
+    };
+
+    // Render the row if it's not being dragged, else render a filler placeholder
+    return this.props.renderRow(
+      data,
+      index,
+      this.state.rlvCurrentDraggingRowIdx === index ? 'placeholder' : 'normal',
+      dragHandleRender(),
+    );
   };
 
   _panGestureOnStateChange = event => {
-    console.debug('event.nativeEvent === ', event.nativeEvent);
     switch (event.nativeEvent.state) {
       case State.BEGAN:
         console.debug(
           '============== Gesture BEGAN =================================',
         );
-        const rlvAtGestureStartIdx = this.yToRlvIndex(
+        const rlvAtGestureStartIdx = this._rlvGetIndexFromY(
           event.nativeEvent.absoluteY,
         );
-        const draggingRowOffset = rlvAtGestureStartIdx * this.props.rowHeight;
-        console.debug('scrollOffset = ', this.state.rlvScrollOffset);
-        this._translateY.setOffset(
-          draggingRowOffset, // TODO: Figure out this offset arse we
-          // draggingRowOffset - this.state.rlvScrollOffset,
-        );
+        const draggingRowOffset =
+          rlvAtGestureStartIdx * this.props.rowHeight - this._rlvScrollOffset;
+
+        console.debug('scrollOffset = ', this._rlvScrollOffset);
+        this._translateY.setOffset(draggingRowOffset);
 
         console.debug(
           'acRowDragStart detected moving idx =',
@@ -248,7 +215,16 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
         break;
 
       case State.ACTIVE:
-        this._rowAbsoluteY.addListener(({value}) => this.acRowMoving(value));
+        console.debug(
+          '==================== Gesture ACTIVE =================================',
+        );
+
+        // this._translateY.addListener(
+        //   ({value}) => (this._rlvDragTranslateY = value),
+        // );
+        this._rowAbsoluteY.addListener(({value}) =>
+          this._panGestureRowMovingListener(value),
+        );
         break;
 
       case State.CANCELLED:
@@ -261,22 +237,24 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
         console.debug(
           '==================== Gesture END =================================',
         );
+        // Stop any more panGestureUpdates
         this._rowAbsoluteY.removeAllListeners();
+        this._translateY.removeAllListeners();
+        // this._rlvScrollingRequested = false;
+        this.setState({isDraggingRow: false});
 
         // Take what we need to update our onSort callback
         const rlvAtStartOfGestureIdx = this.state.rlvAtStartDraggingRowIdx;
         const rlvAtEndOfGestureIdx = this.state.rlvCurrentDraggingRowIdx;
-        const newData = this.state.rowsDataProvider.getAllData();
+        const rlvCurrentData = this.state.rlvDataProvider.getAllData();
 
         // Reset state and internal properties
         this.setState({
-          isDraggingRow: false,
           rlvCurrentDraggingRowIdx: -1,
           rlvAtStartDraggingRowIdx: -1,
         });
-        this._rlvScrollingRequested = false;
-        // this._translateY.resetAnimation();
         this._translateY.setOffset(0);
+        this._rlvDragTranslateY = 0;
 
         // Trigger updating of external data iff necessary depending on if moving up or down in list
         if (rlvAtStartOfGestureIdx > rlvAtEndOfGestureIdx) {
@@ -284,7 +262,7 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
           this.props.onSort(rlvAtStartOfGestureIdx, rlvAtEndOfGestureIdx);
         } else if (rlvAtStartOfGestureIdx < rlvAtEndOfGestureIdx) {
           // Row moved down in the list
-          const lastIndex = newData.length - 1;
+          const lastIndex = rlvCurrentData.length - 1;
           rlvAtEndOfGestureIdx + 1 > lastIndex
             ? this.props.onSort(rlvAtStartOfGestureIdx, null)
             : this.props.onSort(
@@ -303,47 +281,59 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
     }
   };
 
-  _dragHandleRender = () => {
-    return (
-      <PanGestureHandler
-        minPointers={1}
-        maxPointers={1}
-        onGestureEvent={this._panGestureOnEventUpdate}
-        onHandlerStateChange={this._panGestureOnStateChange}>
-        <Animated.View>{this.props.renderDragHandle()}</Animated.View>
-      </PanGestureHandler>
-    );
-  };
+  _panGestureRowMovingListener = (absoluteY: number) => {
+    // Discard anything that may be in the  queue after we've finished dragging
+    if (this.state.isDraggingRow === false) {
+      return;
+    }
 
-  _rlvRowRender = (type, data, index) => {
-    // Render the row if it's not being dragged, else render a filler placeholder
-    return this.props.renderRow(
-      data,
-      index,
-      this.state.rlvCurrentDraggingRowIdx === index ? 'placeholder' : 'normal',
-      this._dragHandleRender(),
-    );
-  };
+    /*
+     * First up, have we dragged the row sufficiently towards the Bottom or Top of the screen that we should
+     * move the view port on RLV Up or Down on the underlying data list
+     */
 
-  _draggingRowRender = (isDragging: boolean, draggingRowIdx: number) => {
-    return (
-      <Animated.View
-        style={{
-          position: 'absolute',
-          transform: [{translateY: this._translateY}],
-          // height: this.props.rowHeight,
-          // width: '100%',
-          zIndex: 200,
-        }}>
-        {isDragging &&
-          this.props.renderRow(
-            this.props.data[draggingRowIdx],
-            draggingRowIdx,
-            'dragging',
-            this.props.renderDragHandle(), // No need wrap PanGestureHandler around
-          )}
-      </Animated.View>
-    );
+    const minDragForOnset = 5;
+    const scrollOnset = this.props.rowHeight;
+    const scrollAmount = 20;
+
+    const containerAbsoluteYBottomOffset =
+      this.state.containerAbsoluteYTopOffset + this.state.containerHeight;
+
+    if (
+      absoluteY >
+      containerAbsoluteYBottomOffset - scrollOnset //&&
+      // this._rlvDragTranslateY > minDragForOnset
+    ) {
+      // Dragged row towards bottom of screen
+      this._rlvTriggerScroll(scrollAmount); // mv view on list down
+    } else if (
+      absoluteY <
+      this.state.containerAbsoluteYTopOffset + scrollOnset //&&
+      //this._rlvDragTranslateY < -minDragForOnset
+    ) {
+      // ... towards top of screen
+      this._rlvTriggerScroll(-scrollAmount); // mv view on list up
+    }
+
+    /*
+     * Every time the dragged row moves over its immediate (above or below) neighbouring row update:
+     * 1) The underlying data list order.
+     * 2) Our references to what is being dragged in that list.
+     */
+    const draggedRowOverListIdx = this._rlvGetIndexFromY(absoluteY);
+
+    if (draggedRowOverListIdx !== this.state.rlvCurrentDraggingRowIdx) {
+      this.setState({
+        rlvDataProvider: this.state.rlvDataProvider.cloneWithRows(
+          immutableMove(
+            this.state.rlvDataProvider.getAllData(),
+            this.state.rlvCurrentDraggingRowIdx,
+            draggedRowOverListIdx,
+          ),
+        ),
+        rlvCurrentDraggingRowIdx: draggedRowOverListIdx,
+      });
+    }
   };
 
   render() {
@@ -364,26 +354,33 @@ export class SortableList<T> extends React.PureComponent<Props<T>, RState> {
      */
 
     return (
-      <View
-        style={{flex: 1}}
-        onLayout={this.rlvOnLayoutStoreLayoutInfo}
-        // key={this.state.reRenderKey}
-      >
-        {this._draggingRowRender(
-          this.state.isDraggingRow,
-          this.state.rlvAtStartDraggingRowIdx,
-        )}
+      <View style={{flex: 1}} onLayout={this.onLayoutStoreLayoutInfo}>
+        <Animated.View
+          style={{
+            position: 'absolute',
+            transform: [{translateY: this._translateY}],
+            zIndex: 200,
+          }}>
+          {this.state.isDraggingRow &&
+            this.props.renderRow(
+              this.props.data[this.state.rlvAtStartDraggingRowIdx], // NB: original data, as current rlv data will be updated
+              this.state.rlvAtStartDraggingRowIdx,
+              'dragging',
+              this.props.renderDragHandle(), // No need wrap PanGestureHandler around as we actually drag what's in RLV and not this.
+            ) // Or show nothing ....
+          }
+        </Animated.View>
         {this.props.data.length < 1 ? null : (
           <RecyclerListView
             key={this.props.rlvKludgeKey}
             ref={this._rlvRef}
             // style={{flex: 1, borderColor: 'red', borderWidth: 1}}
-            onScroll={this.rlvOnScrollStoreOffsetInfo}
+            onScroll={this._rlvOnScrollStoreOffsetInfo}
             layoutProvider={this._rlvLayoutProvider}
-            dataProvider={this.state.rowsDataProvider}
+            dataProvider={this.state.rlvDataProvider}
             rowRenderer={this._rlvRowRender}
             extendedState={{dragging: true}}
-            disableRecycling={true}
+            // disableRecycling={true}
           />
         )}
       </View>

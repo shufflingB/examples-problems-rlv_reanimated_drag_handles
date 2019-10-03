@@ -29,6 +29,10 @@ const dummyData: Array<goal_t> = [
   {id: count, task: `Task id ${count++}`},
   {id: count, task: `Task id ${count++}`},
   {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
 ];
 
 export default class App extends React.Component<{}, state_t> {
@@ -37,8 +41,6 @@ export default class App extends React.Component<{}, state_t> {
   };
 
   goalAddHdlr = (task: string) => {
-    console.debug('Got goalAddHdlr task', task);
-
     const nextState = produce(this.state, (draftState: state_t) => {
       const uniqueEnoughId = Date.now();
       draftState.goals.push({id: uniqueEnoughId, task: task});
@@ -48,8 +50,6 @@ export default class App extends React.Component<{}, state_t> {
   };
 
   goalRmHdlr = (id: number) => {
-    console.debug('Got goalRmHdlr id', id);
-
     const nextState = produce(this.state, (draftState: state_t) => {
       const idxRm = draftState.goals.findIndex(element => element.id === id);
       if (idxRm === -1) {
@@ -63,13 +63,6 @@ export default class App extends React.Component<{}, state_t> {
   };
 
   goalMvHdlr = (idMoved: number, idMovedInFrontOf: number | null) => {
-    console.debug(
-      'Got goalMvHdlr id',
-      idMoved,
-      'in front of ',
-      idMovedInFrontOf,
-    );
-
     const nextState = produce(this.state, (draftState: state_t) => {
       const idxIdMoved = draftState.goals.findIndex(
         (element: goal_t) => element.id === idMoved,
