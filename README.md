@@ -1,10 +1,11 @@
 ## Intro
 
-This is a ios demo app to illustrate a problem that occurs when the [reanimated](https://github.com/kmagiera/react-native-reanimated) library is used in conjunction with
+This is a ios demo app to illustrate a problem/bug that occurs when the [reanimated](https://github.com/kmagiera/react-native-reanimated) library is used in conjunction with
 the [recyclelistview](https://github.com/Flipkart/recyclerlistview) (RLV) component to implement drag re-orderable lists.
 
-All seems to be working correctly up until a row is deleted, whereupon the remaining rows stop being draggable. The only
-way I've found to stop this is change the key attribute to RLV, whereupon the forced RLV re-render causes reanimated's Animated code to be mounted again.
+All seems to be working correctly up until a row is deleted, whereupon the remaining rows stop being draggable. The only way I've found to stop this is change the key attribute to RLV, whereupon the forced RLV re-render causes reanimated's Animated code to be mounted again.
+
+fwiw: In order to get something that worked, I ended up switching out reanimated and had to refactor the Animated.View to always be present. The working version is over on the branch [std_animation_library](https://github.com/shufflingB/examples-problems-rlv_reanimated_drag_handles/tree/std_animation_library)
 
 ## Installation and running
 
