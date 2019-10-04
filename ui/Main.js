@@ -54,24 +54,13 @@ export default class Main extends React.Component<Props, State> {
       <SafeAreaView style={{flex: 1}}>
         <View style={styles.blurb}>
           <Text style={styles.paragraph}>
-            Purpose: Demo app to illustrate the lost drag handles problem with
-            recyclerlistview and reanimated.
+            Todo demo app illustrating drag handles with recyclerlistview
           </Text>
           <Text style={styles.paragraph}>
-            Usage: Move the '@' drag handles to re-order the list.
+            Move the '@' drag handles to re-order the list. Click an 'X' to
+            delete a list entry.
           </Text>
-          <Text style={styles.paragraph}>
-            Click an 'X' to delete a list entry and notice that the '@' drag
-            handles no longer works for the remaining items.
-          </Text>
-          <Text style={styles.paragraph}>
-            Enter a new task and hit return. Notice that the drag handle for
-            _that_ row (doesn't move with dragging), but others remain broken.
-          </Text>
-          <Text style={styles.paragraph}>
-            Reload app (restores all initial rows) or click button to force
-            re-rendering of the drag handles and get them working again.
-          </Text>
+          <Text style={styles.paragraph}>Enter a new task and hit return.</Text>
         </View>
         <NewGoalPanel
           itemDescription={this.state.textGoalDescription}
@@ -124,23 +113,6 @@ export default class Main extends React.Component<Props, State> {
             );
           }}
         />
-        <View
-          style={{
-            flexDirection: 'row',
-            alignContent: 'center',
-            justifyContent: 'center',
-          }}>
-          <RectButton
-            style={styles.fixButton}
-            onPress={() =>
-              this.setState({
-                rlvKeyKludge:
-                  this.state.rlvKeyKludge === 'tick' ? 'toc' : 'tick',
-              })
-            }>
-            <Text>Make drag handles work again</Text>
-          </RectButton>
-        </View>
       </SafeAreaView>
     );
   }

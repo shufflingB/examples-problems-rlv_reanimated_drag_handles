@@ -33,6 +33,16 @@ const dummyData: Array<goal_t> = [
   {id: count, task: `Task id ${count++}`},
   {id: count, task: `Task id ${count++}`},
   {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
+  {id: count, task: `Task id ${count++}`},
 ];
 
 export default class App extends React.Component<{}, state_t> {
